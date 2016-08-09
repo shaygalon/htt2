@@ -12,8 +12,8 @@ Http test tool based on httpress
   	-f file  session file           (default: none)
   	-q       no progress indication (default: no)
   	-z pri   GNUTLS cipher priority (default: NORMAL)
+	-r       Run for time in seconds(default: 120 seconds)
   	-h       show this help
-
 
 ## Sample session file:
 
