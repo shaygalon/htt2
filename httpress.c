@@ -796,42 +796,57 @@ static int more_requests_to_run() {
   int rc;
   int print_flag = 0; 
   rc=__sync_add_and_fetch(&config.request_counter, 1);
-
+  static time_t previous_time = 0;
+  time_t elapsed_time;
 	/* Infinite Mode */
   if (config.infinite==1) {  
       return 1;
       }
 	/* Time Mode */
   else if(config.infinite==0){
-	current_time = time(NULL);
+	current_time  = time(NULL);
   	if(current_time < (config.run_time + start_time_rg)){
-		if(rc%(config.num_requests*10000)==0){
+		elapsed_time = current_time-previous_time;
+		if(elapsed_time > 4){
 			print_flag = 1;
+		        previous_time = current_time;
+		}
+		else{
+			print_flag = 0;
 		}
 	}
 	else{
+		
+		print_flag = 0;
 		return 0;
 	}
   }
 	/*Requests Mode */
   else if(config.infinite==2){
 	if (rc>config.num_requests) {
-	    return 0;
+            return 0;
 	}
 	else{ 
-	    if(config.progress_step>=10 && (rc%config.progress_step==0 || rc==config.num_requests))
+	    if(config.progress_step>=10 && (rc%config.progress_step==0 || rc==config.num_requests)){
 		print_flag = 1;
+	    }
+	    else{
+		print_flag = 0;
+	    }
 	}
   } 
 
   if (!config.quiet && print_flag==1){
-    printf("%d requests launched\n", rc);
+    	if(config.infinite==0)
+		printf("%ld sec:  ",current_time-start_time_rg);
+	printf("%d requests launched\n", rc);
+	print_flag = 0;
   }
   return 1;
 }
 
 static void heartbeat_cb(struct ev_loop *loop, ev_timer *w, int revents) {
-  if (config.request_counter>config.num_requests) {
+  if ((config.request_counter>config.num_requests && config.infinite!=0) || (current_time-start_time_rg>config.run_time && config.infinite==0)) {
     thread_config *tdata=((thread_config*)(((char*)w)-offsetof(thread_config, watch_heartbeat)));
     if (!tdata->shutdown_in_progress) {
       ev_tstamp now=ev_now(tdata->loop);
@@ -1121,7 +1136,7 @@ int main(int argc, char* argv[]) {
   config.ssl_cipher_priority="NORMAL"; // NORMAL:-CIPHER-ALL:+AES-256-CBC:-VERS-TLS-ALL:+VERS-TLS1.0:-KX-ALL:+DHE-RSA
   config.run_time=120;
   
-
+  start_time_rg = time(NULL);
   int c;
   char *session_file=NULL;
   while ((c=getopt(argc, argv, ":hvkqin:r:f:t:c:z:"))!=-1) {
@@ -1313,7 +1328,6 @@ int main(int argc, char* argv[]) {
   int i, j;
   int conns_allocated=0;
   thread_config* tdata;
-  start_time_rg = time(NULL);
 
   for (i=0; i<config.num_threads; i++) {
     threads[i]=
@@ -1366,7 +1380,6 @@ int main(int argc, char* argv[]) {
   cpu_info_t cpustat;
   pthread_create(&(cpustat.tid), 0, cpu_stat_thread, &cpustat);
   
-
   // Unblock signals for the main thread;
   // other threads have inherited sigmask we set earlier
   sigdelset(&set, SIGPIPE); // except SIGPIPE
@@ -1374,7 +1387,6 @@ int main(int argc, char* argv[]) {
     nxweb_log_error("can't unset pthread_sigmask");
     exit(EXIT_FAILURE);
   }
-
   long total_success=0;
   long total_fail=0;
   long total_bytes=0;
