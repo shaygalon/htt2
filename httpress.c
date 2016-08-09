@@ -46,6 +46,7 @@
 #include <sys/sendfile.h>
 #include <netdb.h>
 
+
 //#define WITH_SSL
 static int has_fastopen=1;
 
@@ -69,6 +70,9 @@ typedef uint32_t int_to_ptr;
 #define MAX_SESSIONS 128
 #define MAX_REQ_SIZE 4096
 
+time_t start_time_rg;
+time_t current_time;
+
 struct config {
   int num_connections;
   int num_requests;
@@ -88,7 +92,7 @@ struct config {
   struct addrinfo *session_saddr[MAX_SESSIONS];
   int last_session;
   int infinite;
-
+  int run_time;
 #ifdef WITH_SSL
   gnutls_certificate_credentials_t ssl_cred;
   gnutls_priority_t priority_cache;
@@ -790,12 +794,37 @@ static void shutdown_thread(thread_config* tdata) {
 
 static int more_requests_to_run() {
   int rc;
-  if (config.infinite) { return 1; }
+  int print_flag = 0; 
   rc=__sync_add_and_fetch(&config.request_counter, 1);
-  if (rc>config.num_requests) {
-    return 0;
+
+	/* Infinite Mode */
+  if (config.infinite==1) {  
+      return 1;
+      }
+	/* Time Mode */
+  else if(config.infinite==0){
+	current_time = time(NULL);
+  	if(current_time < (config.run_time + start_time_rg)){
+		if(rc%(config.num_requests*10000)==0){
+			print_flag = 1;
+		}
+	}
+	else{
+		return 0;
+	}
   }
-  if (!config.quiet && config.progress_step>=10 && (rc%config.progress_step==0 || rc==config.num_requests)) {
+	/*Requests Mode */
+  else if(config.infinite==2){
+	if (rc>config.num_requests) {
+	    return 0;
+	}
+	else{ 
+	    if(config.progress_step>=10 && (rc%config.progress_step==0 || rc==config.num_requests))
+		print_flag = 1;
+	}
+  } 
+
+  if (!config.quiet && print_flag==1){
     printf("%d requests launched\n", rc);
   }
   return 1;
@@ -825,7 +854,7 @@ static void rearm_socket(connection* conn) {
     open_socket(conn);
   }
   else {
-    if (!more_requests_to_run()) {
+if (!more_requests_to_run()) {
       conn_close(conn, 1);
       conn->done=1;
       ev_feed_event(conn->tdata->loop, &conn->tdata->watch_heartbeat, EV_TIMER);
@@ -1043,6 +1072,7 @@ static void show_help(void) {
           "  -i        run forever           (default: no)\n"
           "  -q       no progress indication (default: no)\n"
           "  -z pri   GNUTLS cipher priority (default: NORMAL)\n"
+          "  -r       Run for time in seconds(default: 120 seconds)\n"
           "  -h       show this help\n"
           //"  -v       show version\n"
           "\n"
@@ -1087,12 +1117,14 @@ int main(int argc, char* argv[]) {
   config.uri_path=0;
   config.uri_host=0;
   config.request_counter=0;
-  config.infinite=0;
+  config.infinite=2;
   config.ssl_cipher_priority="NORMAL"; // NORMAL:-CIPHER-ALL:+AES-256-CBC:-VERS-TLS-ALL:+VERS-TLS1.0:-KX-ALL:+DHE-RSA
+  config.run_time=120;
+  
 
   int c;
   char *session_file=NULL;
-  while ((c=getopt(argc, argv, ":hvkqin:f:t:c:z:"))!=-1) {
+  while ((c=getopt(argc, argv, ":hvkqin:r:f:t:c:z:"))!=-1) {
     switch (c) {
       case 'h':
         show_help();
@@ -1125,13 +1157,20 @@ int main(int argc, char* argv[]) {
 	  case 'i':
 		config.infinite=1;
 		break;
+      case 'r':
+        config.run_time=atoi(optarg);
+        config.infinite=0;      /*config.infinite = 0 means run_time is enabled and infinite disabled. 
+                                   config.infinite = 1 means infinite enabled and run_time disabled.
+                                   config.infinite = 2 means run_time is disabled and requests mode is enabled */
+        break;
       case '?':
         fprintf(stderr, "unkown option: -%c\n\n", optopt);
         show_help();
         return EXIT_FAILURE;
     }
   }
-
+  if (config.infinite == 0)
+	config.num_requests = 10*config.num_threads*config.num_connections;
   if ((session_file==NULL) && (argc-optind)<1) {
     fprintf(stderr, "missing url argument\n\n");
     show_help();
@@ -1142,7 +1181,9 @@ int main(int argc, char* argv[]) {
     show_help();
     return EXIT_FAILURE;
   }
-
+  if ((config.run_time<1 || config.run_time>3600) && config.infinite==0){
+   nxweb_die("Recheck run time. This value should be less than 1 hour"); 
+  }
   if (config.num_requests<1 || config.num_requests>1000000000) nxweb_die("wrong number of requests");
   if (config.num_connections<1 || config.num_connections>1000000 || config.num_connections>config.num_requests) nxweb_die("wrong number of connections");
   if (config.num_threads<1 || config.num_threads>100000 || config.num_threads>config.num_connections) nxweb_die("wrong number of threads");
@@ -1150,10 +1191,6 @@ int main(int argc, char* argv[]) {
   config.progress_step=config.num_requests/4;
   if (config.progress_step>50000) config.progress_step=50000;
 
-
-
-
-  
   if (session_file != NULL) {
 	  int session_id=-1;
 	  int num_urls=0;
@@ -1276,6 +1313,8 @@ int main(int argc, char* argv[]) {
   int i, j;
   int conns_allocated=0;
   thread_config* tdata;
+  start_time_rg = time(NULL);
+
   for (i=0; i<config.num_threads; i++) {
     threads[i]=
     tdata=memalign(MEM_GUARD, sizeof(thread_config)+MEM_GUARD);
