@@ -45,7 +45,7 @@
 #include <arpa/inet.h>
 #include <sys/sendfile.h>
 #include <netdb.h>
-
+#include <math.h>
 
 //#define WITH_SSL
 static int has_fastopen=1;
@@ -1424,7 +1424,7 @@ int main(int argc, char* argv[]) {
   int millisec=duration;
   //duration=(duration-millisec)*1000;
   //int microsec=duration;
-  int rps=total_success/(ts_end-ts_start);
+  double rps=total_success/(ts_end-ts_start);
   int kbps=(total_bytes+total_overhead) / (ts_end-ts_start) / 1024;
   ev_tstamp avg_req_time=total_success? (ts_end-ts_start) * config.num_connections / total_success : 0;
 
@@ -1464,8 +1464,15 @@ int main(int argc, char* argv[]) {
          total_success?total_bytes/total_success:0L, total_success?total_overhead/total_success:0L, total_bytes, total_overhead);
   printf("CPUSTAT:  max,%.1Lf,min,%.1Lf,avg,%.1Lf \n",
          cpustat.max, cpustat.min,cpustat.avg);
-  printf("TIMING:  %d.%03d seconds, %d rps, %d kbps, %.1f ms avg req time\n",
+  if (rps > 100) {
+	int irps=floor(rps);
+  	printf("TIMING:  %d.%03d seconds, %d rps, %d kbps, %.1f ms avg req time\n",
+         sec, millisec, /*microsec,*/ irps, kbps, (float)(avg_req_time*1000));
+  }
+  else {
+  	printf("TIMING:  %d.%03d seconds, %.2f rps, %d kbps, %.1f ms avg req time\n",
          sec, millisec, /*microsec,*/ rps, kbps, (float)(avg_req_time*1000));
+  }
 
   pthread_join(cpustat.tid,0);
 		 
