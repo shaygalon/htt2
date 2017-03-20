@@ -846,7 +846,10 @@ static int more_requests_to_run() {
 }
 
 static void heartbeat_cb(struct ev_loop *loop, ev_timer *w, int revents) {
-  if ((config.request_counter>config.num_requests && config.infinite!=0) || (current_time-start_time_rg>config.run_time && config.infinite==0)) {
+  if (
+	(config.request_counter>config.num_requests && config.infinite==2) || 
+	((current_time-start_time_rg) > config.run_time && config.infinite==0)) 
+  {
     thread_config *tdata=((thread_config*)(((char*)w)-offsetof(thread_config, watch_heartbeat)));
     if (!tdata->shutdown_in_progress) {
       ev_tstamp now=ev_now(tdata->loop);
